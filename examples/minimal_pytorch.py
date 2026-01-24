@@ -2,9 +2,10 @@
 Minimal runnable example demonstrating integration of the
 Runtime Stability Controller with a PyTorch training loop.
 
-This example intentionally uses a dummy probe and snapshot
-manager. It is meant to illustrate usage and API flow, not
-the full stability logic.
+This example illustrates how optimizer updates are supervised
+at runtime using an external validation-based measurement probe.
+The focus is on system integration and API flow rather than
+performance or advanced recovery policies.
 """
 
 import torch
@@ -13,49 +14,31 @@ import torch.optim as optim
 
 from runtime_stability_controller.controller import StabilityController
 from runtime_stability_controller.probes.base import Probe
-from runtime_stability_controller.snapshot import SnapshotManager
+from runtime_stability_controller.snapshot import InMemorySnapshotManager
 
 
 # ---------------------------------------------------------------------
-# Dummy implementations for demonstration purposes
+# Validation-based measurement probe
 # ---------------------------------------------------------------------
 
-class DummyProbe(Probe):
+class ValidationLossProbe(Probe):
     """
-    A trivial probe that evaluates model state using
-    validation loss on a fixed batch.
+    Measurement probe that evaluates model state using
+    validation loss on a fixed, held-out batch.
     """
 
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
+    def __init__(self, x_val, y_val):
+        self.x_val = x_val
+        self.y_val = y_val
         self.loss_fn = nn.MSELoss()
 
     def evaluate(self, model):
         model.eval()
         with torch.no_grad():
-            pred = model(self.x)
-            loss = self.loss_fn(pred, self.y)
+            pred = model(self.x_val)
+            loss = self.loss_fn(pred, self.y_val)
         model.train()
         return float(loss.item())
-
-
-class DummySnapshotManager(SnapshotManager):
-    """
-    Snapshot manager that stores model and optimizer state in memory.
-    """
-
-    def __init__(self):
-        self._model_state = None
-        self._optimizer_state = None
-
-    def save(self, model, optimizer):
-        self._model_state = {k: v.clone() for k, v in model.state_dict().items()}
-        self._optimizer_state = optimizer.state_dict()
-
-    def restore(self, model, optimizer):
-        model.load_state_dict(self._model_state)
-        optimizer.load_state_dict(self._optimizer_state)
 
 
 # ---------------------------------------------------------------------
@@ -65,7 +48,7 @@ class DummySnapshotManager(SnapshotManager):
 def main():
     torch.manual_seed(0)
 
-    # Simple linear regression task
+    # Simple linear regression model
     model = nn.Linear(1, 1)
     optimizer = optim.SGD(model.parameters(), lr=0.1)
     loss_fn = nn.MSELoss()
@@ -78,36 +61,36 @@ def main():
     x_val = torch.randn(8, 1)
     y_val = 2.0 * x_val
 
-    probe = DummyProbe(x_val, y_val)
-    snapshot_manager = DummySnapshotManager()
+    # Runtime stability components
+    probe = ValidationLossProbe(x_val, y_val)
+    snapshot_manager = InMemorySnapshotManager()
 
     controller = StabilityController(
         probe=probe,
         snapshot_manager=snapshot_manager,
-        threshold=1.0,
+        threshold=0.5,     # conservative threshold for demonstration
         smoothing=0.1,
     )
 
-    # Initialize controller
+    # Initialize controller (reference signal + initial safe snapshot)
     controller.initialize(model, optimizer)
 
-    # Training loop
+    # Training loop with supervised optimizer steps
     for step in range(20):
         optimizer.zero_grad()
         pred = model(x_train)
         loss = loss_fn(pred, y_train)
         loss.backward()
 
-        # Optimizer proposes update
-        optimizer.step()
+        accepted = controller.step(model, optimizer)
 
-        # Controller supervision (logic not implemented yet)
-        accepted = True  # placeholder for controller.step(model, optimizer)
-
-        if accepted:
-            snapshot_manager.save(model, optimizer)
-
-        print(f"Step {step:02d} | loss = {loss.item():.4f}")
+        print(
+            f"Step {step:02d} | "
+            f"train_loss={loss.item():.4f} | "
+            f"probe={controller.last_measurement:.4f} | "
+            f"innovation={controller.last_innovation:.4f} | "
+            f"accepted={accepted}"
+        )
 
     print("Training completed.")
 
