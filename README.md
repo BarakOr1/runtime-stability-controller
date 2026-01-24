@@ -70,3 +70,7 @@ Barak Or
 Preprint, 2026
 
 The paper formalizes the method, provides theoretical runtime safety guarantees, and demonstrates empirical recovery behavior on convolutional and Transformer-based architectures.
+
+The full paper PDF is available here:  
+[`paper/Automatic_Stability_and_Recovery_for_Neural_Network_Training.pdf`](paper/Automatic_Stability_and_Recovery_for_Neural_Network_Training.pdf)
+
