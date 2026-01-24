@@ -11,34 +11,11 @@ performance or advanced recovery policies.
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.utils.data import TensorDataset, DataLoader
 
 from runtime_stability_controller.controller import StabilityController
-from runtime_stability_controller.probes.base import Probe
+from runtime_stability_controller.probes import ValidationProbe
 from runtime_stability_controller.snapshot import InMemorySnapshotManager
-
-
-# ---------------------------------------------------------------------
-# Validation-based measurement probe
-# ---------------------------------------------------------------------
-
-class ValidationLossProbe(Probe):
-    """
-    Measurement probe that evaluates model state using
-    validation loss on a fixed, held-out batch.
-    """
-
-    def __init__(self, x_val, y_val):
-        self.x_val = x_val
-        self.y_val = y_val
-        self.loss_fn = nn.MSELoss()
-
-    def evaluate(self, model):
-        model.eval()
-        with torch.no_grad():
-            pred = model(self.x_val)
-            loss = self.loss_fn(pred, self.y_val)
-        model.train()
-        return float(loss.item())
 
 
 # ---------------------------------------------------------------------
@@ -57,18 +34,21 @@ def main():
     x_train = torch.randn(32, 1)
     y_train = 2.0 * x_train + 0.1 * torch.randn(32, 1)
 
-    # Fixed validation probe data
+    # Validation probe data (held-out)
     x_val = torch.randn(8, 1)
     y_val = 2.0 * x_val
 
+    val_dataset = TensorDataset(x_val, y_val)
+    val_loader = DataLoader(val_dataset, batch_size=8)
+
     # Runtime stability components
-    probe = ValidationLossProbe(x_val, y_val)
+    probe = ValidationProbe(val_loader)
     snapshot_manager = InMemorySnapshotManager()
 
     controller = StabilityController(
         probe=probe,
         snapshot_manager=snapshot_manager,
-        threshold=0.5,     # conservative threshold for demonstration
+        threshold=0.5,   # conservative threshold for demonstration
         smoothing=0.1,
     )
 
