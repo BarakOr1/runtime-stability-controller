@@ -202,12 +202,27 @@ plt.ylabel("Loss")
 
 # Innovation signal
 plt.subplot(1, 3, 3)
+
+# Innovation curve
 plt.plot(steps, innovations, label="Innovation νₜ")
+
+# Perturbation window (paper Section 3.3)
+plt.axvspan(
+    100,
+    110,
+    color="gray",
+    alpha=0.15,
+    label="Perturbation window"
+)
+
+# Acceptance threshold
 plt.axhline(
     controller.threshold,
     linestyle="--",
+    color="black",
     label="Threshold ε"
 )
+
 
 rejected_steps = [i for i, a in enumerate(accepted_flags) if not a]
 if rejected_steps:
