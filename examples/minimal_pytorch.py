@@ -14,6 +14,11 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, Subset
 import torchvision
 import torchvision.transforms as T
+
+import matplotlib
+matplotlib.use("module://matplotlib_inline.backend_inline")
+
+
 import matplotlib.pyplot as plt
 import numpy as np
 
