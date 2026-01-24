@@ -1,9 +1,9 @@
 """
-Stability controller core logic.
+Runtime stability controller.
 
-Defines the main StabilityController interface responsible for
-supervising optimizer-proposed updates and enforcing runtime
-accept / rollback decisions.
+Defines the main supervisory logic that evaluates optimizer-proposed
+updates using external measurement signals and enforces accept / rollback
+decisions at runtime.
 """
 
 
@@ -11,31 +11,61 @@ class StabilityController:
     """
     Runtime stability controller.
 
-    This class supervises optimizer updates using external
-    measurement signals and enables rollback to a previously
-    accepted safe state when instability is detected.
+    The controller operates as an external supervisory layer that
+    monitors optimizer-proposed updates and intervenes only when
+    destabilizing behavior is detected.
     """
 
-    def __init__(self, probe, threshold):
-        self.probe = probe
-        self.threshold = threshold
-
-    def step(self, model, optimizer, loss):
+    def __init__(self, probe, snapshot_manager, threshold, smoothing=None):
         """
-        Perform a supervised optimizer step.
-
         Parameters
         ----------
-        model : torch.nn.Module
-            The model being trained.
-        optimizer : torch.optim.Optimizer
-            The optimizer proposing parameter updates.
-        loss : torch.Tensor
-            The training loss for the current batch.
-
-        Notes
-        -----
-        This method is intentionally left unimplemented.
+        probe : Probe
+            External measurement probe used to evaluate proposed updates.
+        snapshot_manager : SnapshotManager
+            Manages saving and restoring safe training states.
+        threshold : float
+            Acceptance threshold for the innovation signal.
+        smoothing : float, optional
+            Optional smoothing factor for reference signal tracking.
         """
-        raise NotImplementedError("Runtime stability logic not yet implemented.")
+        self.probe = probe
+        self.snapshot_manager = snapshot_manager
+        self.threshold = threshold
+        self.smoothing = smoothing
 
+        self._reference_value = None
+
+    def initialize(self, model, optimizer):
+        """
+        Initialize the controller state.
+
+        Must be called once before training begins.
+        """
+        value = self.probe.evaluate(model)
+        self._reference_value = value
+        self.snapshot_manager.save(model, optimizer)
+
+    def step(self, model, optimizer):
+        """
+        Supervised optimizer step.
+
+        This method evaluates the effect of an optimizer-proposed update
+        and decides whether to accept it or rollback to the last safe state.
+
+        Returns
+        -------
+        bool
+            True if the update was accepted, False if rollback was triggered.
+        """
+        raise NotImplementedError
+
+    def _update_reference(self, value):
+        """
+        Update the reference signal after an accepted step.
+        """
+        if self.smoothing is None:
+            self._reference_value = value
+        else:
+            alpha = self.smoothing
+            self._reference_value = (1 - alpha) * self._reference_value + alpha * value
