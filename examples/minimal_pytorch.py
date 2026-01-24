@@ -1,12 +1,18 @@
+# ================================================================
 # Exact runnable demo aligned with:
 # "Automatic Stability and Recovery for Neural Network Training"
-# Sections 3.1, 3.3, Algorithm 1
+#
+# Sections: 3.1 (Vision Model), 3.3 (Training Protocol), Algorithm 1
 #
 # Model: ResNet-18
 # Dataset: CIFAR-10
 # Optimizer: AdamW
-# Measurement: Validation probe (held-out subset)
-# Output: Runtime plots + conclusions
+# Measurement: Validation probe (fixed held-out subset)
+#
+# This script demonstrates:
+# - Passive controller behavior during nominal training
+# - Active intervention under controlled catastrophic perturbation
+# ================================================================
 
 import torch
 import torch.nn as nn
@@ -15,9 +21,9 @@ from torch.utils.data import DataLoader, Subset
 import torchvision
 import torchvision.transforms as T
 
+# Force inline plotting in Colab / notebooks
 import matplotlib
 matplotlib.use("module://matplotlib_inline.backend_inline")
-
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -33,37 +39,62 @@ torch.manual_seed(0)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # --------------------------------------------------
-# Dataset: CIFAR-10 (as in the paper)
+# Demo configuration
+# --------------------------------------------------
+# When True, injects a controlled catastrophic perturbation
+# to activate the runtime stability controller (paper Section 3.3).
+# When False, training remains nominal and the controller stays passive.
+ENABLE_CATASTROPHIC_PERTURBATION = True
+
+# --------------------------------------------------
+# Dataset: CIFAR-10 (paper Section 3.1)
 # --------------------------------------------------
 transform = T.Compose([
     T.ToTensor(),
-    T.Normalize((0.4914, 0.4822, 0.4465),
-                (0.2023, 0.1994, 0.2010))
+    T.Normalize(
+        mean=(0.4914, 0.4822, 0.4465),
+        std=(0.2023, 0.1994, 0.2010)
+    )
 ])
 
 train_set = torchvision.datasets.CIFAR10(
-    root="./data", train=True, download=True, transform=transform
+    root="./data",
+    train=True,
+    download=True,
+    transform=transform
 )
+
 test_set = torchvision.datasets.CIFAR10(
-    root="./data", train=False, download=True, transform=transform
+    root="./data",
+    train=False,
+    download=True,
+    transform=transform
 )
 
 train_loader = DataLoader(
-    train_set, batch_size=128, shuffle=True, num_workers=2
+    train_set,
+    batch_size=128,
+    shuffle=True,
+    num_workers=2
 )
 
-# Validation probe: small fixed subset (paper setting)
+# Validation probe: small fixed subset (paper protocol)
 probe_indices = list(range(32))
 probe_subset = Subset(test_set, probe_indices)
-probe_loader = DataLoader(probe_subset, batch_size=32, shuffle=False)
+probe_loader = DataLoader(
+    probe_subset,
+    batch_size=32,
+    shuffle=False
+)
 
 # --------------------------------------------------
-# Model: ResNet-18
+# Model: ResNet-18 (paper Section 3.1)
 # --------------------------------------------------
-model = torchvision.models.resnet18(num_classes=10).to(device)
+model = torchvision.models.resnet18(num_classes=10)
+model = model.to(device)
 
 # --------------------------------------------------
-# Optimization
+# Optimization (paper Section 3.1)
 # --------------------------------------------------
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.AdamW(model.parameters(), lr=1e-3)
@@ -71,20 +102,29 @@ optimizer = optim.AdamW(model.parameters(), lr=1e-3)
 # --------------------------------------------------
 # Runtime stability components (Algorithm 1)
 # --------------------------------------------------
-probe = ValidationProbe(probe_loader, loss_fn=criterion, device=device)
+probe = ValidationProbe(
+    dataloader=probe_loader,
+    loss_fn=criterion,
+    device=device
+)
+
 snapshot_manager = InMemorySnapshotManager()
 
 controller = StabilityController(
     probe=probe,
     snapshot_manager=snapshot_manager,
-    threshold=0.5,   # ε
-    smoothing=0.1    # α
+    threshold=0.5,   # ε (acceptance threshold)
+    smoothing=0.1    # α (reference smoothing)
 )
 
+# Initialize controller:
+# - compute y(θ₀)
+# - initialize reference signal ŷ₀
+# - store initial safe snapshot
 controller.initialize(model, optimizer)
 
 # --------------------------------------------------
-# Metrics collection
+# Metrics collection (for plots)
 # --------------------------------------------------
 train_losses = []
 probe_losses = []
@@ -92,7 +132,7 @@ innovations = []
 accepted_flags = []
 
 # --------------------------------------------------
-# Training loop (Algorithm 1)
+# Training loop (Algorithm 1, paper Section 3.3)
 # --------------------------------------------------
 model.train()
 num_steps = 250
@@ -111,8 +151,19 @@ while step < num_steps:
         loss = criterion(logits, labels)
         loss.backward()
 
+        # --------------------------------------------------
+        # Controlled catastrophic perturbation (paper Section 3.3)
+        # --------------------------------------------------
+        # Gradient amplification window to induce instability
+        if ENABLE_CATASTROPHIC_PERTURBATION and 100 <= step < 110:
+            for p in model.parameters():
+                if p.grad is not None:
+                    p.grad.mul_(300.0)
+
+        # Runtime-supervised optimizer step (Algorithm 1)
         accepted = controller.step(model, optimizer)
 
+        # Store metrics
         train_losses.append(loss.item())
         probe_losses.append(controller.last_measurement)
         innovations.append(controller.last_innovation)
@@ -129,7 +180,7 @@ while step < num_steps:
         step += 1
 
 # --------------------------------------------------
-# Plots (paper-style diagnostics)
+# Plots (diagnostic, paper-style)
 # --------------------------------------------------
 steps = np.arange(len(train_losses))
 
@@ -152,13 +203,17 @@ plt.ylabel("Loss")
 # Innovation signal
 plt.subplot(1, 3, 3)
 plt.plot(steps, innovations, label="Innovation νₜ")
-plt.axhline(controller.threshold, linestyle="--", label="Threshold ε")
+plt.axhline(
+    controller.threshold,
+    linestyle="--",
+    label="Threshold ε"
+)
 
-rejected = [i for i, a in enumerate(accepted_flags) if not a]
-if rejected:
+rejected_steps = [i for i, a in enumerate(accepted_flags) if not a]
+if rejected_steps:
     plt.scatter(
-        rejected,
-        [innovations[i] for i in rejected],
+        rejected_steps,
+        [innovations[i] for i in rejected_steps],
         color="red",
         label="Rejected"
     )
@@ -171,18 +226,22 @@ plt.tight_layout()
 plt.show()
 
 # --------------------------------------------------
-# Conclusions
+# Conclusions (explicit, paper-aligned)
 # --------------------------------------------------
 print("\n=== Conclusions ===")
 print(
     "This demo reproduces the experimental setting of the paper using\n"
     "ResNet-18 on CIFAR-10 with a validation-based measurement probe.\n\n"
-    "The innovation signal remains bounded during stable training,\n"
-    "and the runtime controller remains passive, accepting updates\n"
+    "A controlled destabilization window is injected by amplifying\n"
+    "gradients for a small number of steps (enabled by default via\n"
+    "ENABLE_CATASTROPHIC_PERTURBATION).\n\n"
+    "During nominal training, the innovation signal remains bounded and\n"
+    "the runtime controller remains passive, accepting optimizer updates\n"
     "without modifying the optimizer.\n\n"
-    "When the innovation exceeds the safety threshold, updates are\n"
-    "selectively rejected and rolled back, preventing irreversible\n"
-    "training degradation.\n\n"
+    "When destabilizing updates are introduced, the innovation signal\n"
+    "exceeds the safety threshold, triggering selective rejection and\n"
+    "rollback to the last safe state. Training stability is recovered\n"
+    "without restarting or altering the optimizer.\n\n"
     "This demonstrates training reliability enforced as a runtime\n"
-    "safety property, independent of the optimizer design."
+    "safety property, decoupled from the optimizer design."
 )
