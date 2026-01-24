@@ -223,7 +223,17 @@ plt.xlabel("Step")
 plt.legend()
 
 plt.tight_layout()
-plt.show()
+plt.tight_layout()
+
+# Save figure at high resolution (300 DPI)
+plt.savefig(
+    "runtime_stability_demo.png",
+    dpi=300,
+    bbox_inches="tight"
+)
+
+plt.show(block=True)
+
 
 # --------------------------------------------------
 # Conclusions (explicit, paper-aligned)
