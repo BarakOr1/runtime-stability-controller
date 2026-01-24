@@ -75,13 +75,12 @@ The full paper PDF is available here:
 [`paper/Automatic_Stability_and_Recovery_for_Neural_Network_Training.pdf`](paper/Automatic_Stability_and_Recovery_for_Neural_Network_Training.pdf)
 
 You can easily run this on Google Colab:
-'''
+```python
 !git clone https://github.com/BarakOr1/runtime-stability-controller.git && \
 pip install -q torch && \
 cd runtime-stability-controller && \
 export PYTHONPATH=$PWD && \
 python -c "import runtime_stability_controller; print('import ok')" && \
 python examples/minimal_pytorch.py
-
-'''
+```
 
